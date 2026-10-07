@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>숲길 타워 디펜스</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      font-family: "Malgun Gothic", system-ui, sans-serif; color: #f7f3df;
+      background: radial-gradient(circle at 50% 0%, #314d51 0%, #15282c 48%, #0c1719 100%);
+    }
+    .game {
+      position: relative; width: 800px; height: 600px; padding: 18px; border: 1px solid #5e7d70; border-radius: 20px;
+      background: rgba(10, 27, 29, .9); box-shadow: 0 24px 80px #0009;
+    }
+    .game.shake { animation: shake .32s linear; }
+    @keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-7px); } 75% { transform: translateX(7px); } }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 15px; margin-bottom: 16px; }
+    h1 { margin: 0; font-size: clamp(22px, 4vw, 32px); letter-spacing: -1px; }
+    .stats { display: flex; flex-wrap: wrap; gap: 8px; justify-content: end; }
+    .stat { padding: 8px 12px; border-radius: 999px; background: #203b39; font-weight: 700; white-space: nowrap; }
+    .gold { color: #ffdc70; } .health { color: #ff8c85; } .wave { color: #9cecc7; }
+    .health.damage { color: #ff3f3f; background: #64252a; animation: healthFlash .4s ease-out; }
+    @keyframes healthFlash { 50% { transform: scale(1.12); } }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 18px; }
+    #board {
+      position: relative; display: grid; grid-template-columns: repeat(12, 1fr); aspect-ratio: 12 / 8;
+      overflow: hidden; border: 4px solid #6c986e; border-radius: 12px; background: #5b9159;
+    }
+    .cell { position: relative; border: 1px solid #4a7e4d; cursor: pointer; transition: filter .16s, background .16s; }
+    .cell:not(.path):not(.tower):hover { filter: brightness(1.2); background: #75aa62; }
+    .path { background: #b99566; border-color: #97754f; cursor: not-allowed; }
+    .path::after { content: ""; position: absolute; inset: 25%; border-radius: 50%; background: #cba97b; opacity: .45; }
+    .tower { cursor: default; }
+    .tower::before {
+      content: "▲"; position: absolute; z-index: 1; left: 50%; top: 50%; transform: translate(-50%, -58%);
+      color: #e9f5ec; font-size: clamp(16px, 3vw, 28px); text-shadow: 0 2px 0 #1a3b3c;
+    }
+    .tower::after { content: ""; position: absolute; inset: 28%; border-radius: 50%; background: #254c58; border: 3px solid #8bc5bd; }
+    .tower[data-level="2"]::before { content: "▲▲"; font-size: 18px; }
+    .tower[data-level="3"]::before { content: "▲▲▲"; font-size: 14px; }
+    .enemy {
+      position: absolute; z-index: 5; width: 5.5%; aspect-ratio: 1; transform: translate(-50%, -50%);
+      border-radius: 50%; border: 2px solid #6a2024; background: radial-gradient(circle at 35% 30%, #ffb071 0 12%, #d24b48 14% 62%, #7f282d 64%);
+      box-shadow: 0 3px 5px #0007; transition: left .075s linear, top .075s linear;
+    }
+    .enemy.boss { background: radial-gradient(circle at 35% 30%, #f3cc99 0 11%, #8e5bcb 13% 62%, #4d2874 64%); border-color: #362052; }
+    .enemy .bar { position: absolute; top: -7px; left: -2px; width: calc(100% + 4px); height: 4px; overflow: hidden; border-radius: 5px; background: #3a2525; }
+    .enemy .bar > i { display: block; height: 100%; background: #8dff8c; }
+    .bullet { position: absolute; z-index: 4; width: 8px; height: 8px; border-radius: 50%; background: #fff0a0; box-shadow: 0 0 8px #ffe881; pointer-events: none; }
+    .gold-gain { position: absolute; z-index: 6; color: #ffdf69; font-weight: 900; text-shadow: 0 2px 3px #261c10; pointer-events: none; transform: translate(-50%, -50%); animation: goldGain .8s ease-out forwards; }
+    @keyframes goldGain { to { transform: translate(-50%, -35px); opacity: 0; } }
+    aside { display: flex; flex-direction: column; gap: 12px; }
+    .panel { padding: 15px; border: 1px solid #41655e; border-radius: 12px; background: #183132; }
+    .panel h2 { margin: 0 0 8px; font-size: 17px; color: #a9e9c0; }
+    .panel p { margin: 0; font-size: 14px; line-height: 1.65; color: #d1dfd5; }
+    button { border: 0; border-radius: 9px; padding: 12px; color: #122627; background: #a9e9c0; font: inherit; font-weight: 800; cursor: pointer; transition: transform .15s, filter .15s; }
+    button:hover { transform: translateY(-1px); filter: brightness(1.08); }
+    button:disabled { cursor: not-allowed; filter: grayscale(1); opacity: .55; transform: none; }
+    #message { min-height: 24px; margin: 12px 3px 0; color: #ffdc70; font-weight: 700; text-align: center; }
+    .legend { display: flex; gap: 8px; align-items: center; margin-top: auto; font-size: 12px; color: #abc0b0; }
+    .dot { width: 11px; height: 11px; display: inline-block; border-radius: 50%; background: #d24b48; }
+    .screen {
+      position: absolute; inset: 0; z-index: 10; display: none; place-items: center; text-align: center;
+      background: rgba(8, 24, 26, .9); border-radius: 20px;
+    }
+    .screen.show { display: grid; }
+    .screen .card { padding: 36px 48px; border: 1px solid #9cecc7; border-radius: 18px; background: #183b38; box-shadow: 0 12px 38px #0008; }
+    .screen h2 { margin: 0 0 10px; font-size: 32px; color: #ffdc70; }
+    .screen p { margin: 0 0 22px; color: #d1dfd5; }
+    .stars { margin: -10px 0 20px; color: #ffdc70; font-size: 28px; letter-spacing: 3px; }
+  </style>
+</head>
+<body>
+  <main class="game">
+    <header>
+      <h1>🌲 숲길 타워 디펜스</h1>
+      <div class="stats">
+        <span class="stat gold">🪙 골드 <b id="gold">120</b></span>
+        <span class="stat health">❤ 기지 <b id="health">20</b></span>
+        <span class="stat wave">⚔ <b id="wave">웨이브 1 / 10</b></span>
+      </div>
+    </header>
+    <section class="layout">
+      <div id="board" aria-label="게임 보드"></div>
+      <aside>
+        <div class="panel"><h2>궁수 타워 · 50 골드</h2><p>가장 가까운 적을 자동으로 공격합니다.<br>클릭: 2단계(50) · 3단계(100)</p></div>
+        <button id="startBtn">웨이브 1 시작</button>
+        <div class="panel"><h2>플레이 방법</h2><p>잔디의 빈 칸을 클릭해 타워를 설치하세요. 적이 끝까지 도달하면 기지가 피해를 입습니다.</p></div>
+        <div class="legend"><span class="dot"></span> 적은 길을 따라 기지로 향합니다</div>
+      </aside>
+    </section>
+    <div id="message">타워를 설치한 뒤 웨이브를 시작하세요!</div>
+    <section id="startScreen" class="screen show">
+      <div class="card"><h2>🌲 숲길 타워 디펜스</h2><p>숲의 마지막 관문을 지켜라.</p><button id="beginBtn">수호 시작</button></div>
+    </section>
+    <section id="endScreen" class="screen" aria-live="polite">
+      <div class="card"><h2 id="endTitle"></h2><p id="endCopy"></p><div id="stars" class="stars"></div><button id="restartBtn">새 게임 시작</button></div>
+    </section>
+  </main>
+  <script>
+    const COLS = 12, ROWS = 8, MAX_WAVE = 10, TOWER_COST = 50, TOWER_RANGE = 2.25;
+    const TOWER_DAMAGE = [0, 12, 24, 42], UPGRADE_COST = [0, 50, 100], WAVE_BONUS = 20;
+    const path = [[0,3],[1,3],[2,3],[2,2],[2,1],[3,1],[4,1],[5,1],[5,2],[5,3],[6,3],[7,3],[8,3],[8,4],[8,5],[9,5],[10,5],[11,5]];
+    const pathSet = new Set(path.map(([x,y]) => `${x},${y}`));
+    const board = document.querySelector('#board'), goldEl = document.querySelector('#gold'), healthEl = document.querySelector('#health'), waveEl = document.querySelector('#wave'), startBtn = document.querySelector('#startBtn'), message = document.querySelector('#message'), startScreen = document.querySelector('#startScreen'), endScreen = document.querySelector('#endScreen'), beginBtn = document.querySelector('#beginBtn'), restartBtn = document.querySelector('#restartBtn'), endTitle = document.querySelector('#endTitle'), endCopy = document.querySelector('#endCopy'), stars = document.querySelector('#stars'), game = document.querySelector('.game'), healthBox = healthEl.closest('.health');
+    let gold = 120, health = 20, wave = 1, running = false, towers = [], enemies = [], bullets = [], spawnTimer, lastTime = 0;
+
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      const cell = document.createElement('div'); cell.className = 'cell' + (pathSet.has(`${x},${y}`) ? ' path' : ''); cell.dataset.x = x; cell.dataset.y = y;
+      cell.addEventListener('click', () => placeTower(x, y, cell));
+      cell.addEventListener('contextmenu', event => { event.preventDefault(); sellTower(x, y, cell); });
+      board.append(cell);
+    }
+    function updateStats() { goldEl.textContent = gold; healthEl.textContent = health; waveEl.textContent = `웨이브 ${wave} / ${MAX_WAVE}`; }
+    function placeTower(x, y, cell) {
+      if (cell.classList.contains('tower')) { upgradeTower(x, y, cell); return; }
+      if (running || cell.classList.contains('path')) return;
+      if (gold < TOWER_COST) { message.textContent = '골드가 부족합니다'; return; }
+      gold -= TOWER_COST; towers.push({ x, y, level: 1, damage: TOWER_DAMAGE[1], cooldown: 0 }); cell.classList.add('tower'); cell.dataset.level = 1; updateStats(); message.textContent = '궁수 타워를 설치했습니다.';
+    }
+    function upgradeTower(x, y, cell) {
+      const tower = towers.find(item => item.x === x && item.y === y);
+      if (!tower) return;
+      if (tower.level === 3) { message.textContent = '이미 최고 단계 타워입니다.'; return; }
+      const cost = UPGRADE_COST[tower.level];
+      if (gold < cost) { message.textContent = '골드가 부족합니다'; return; }
+      gold -= cost; tower.level++; tower.damage = TOWER_DAMAGE[tower.level]; cell.dataset.level = tower.level;
+      updateStats(); message.textContent = `타워를 ${tower.level}단계로 업그레이드했습니다.`;
+    }
+    function sellTower(x, y, cell) {
+      const towerIndex = towers.findIndex(tower => tower.x === x && tower.y === y);
+      if (towerIndex === -1) return;
+      towers.splice(towerIndex, 1); cell.classList.remove('tower'); gold += TOWER_COST / 2;
+      updateStats(); message.textContent = '타워를 판매해 25골드를 얻었습니다.';
+    }
+    function spawnEnemy(index, total) {
+      const boss = index === total - 1 && (wave === 5 || wave === 10);
+      const maxHp = boss ? 550 + wave * 100 : 45 + wave * 12;
+      const el = document.createElement('div'); el.className = 'enemy' + (boss ? ' boss' : ''); el.innerHTML = '<span class="bar"><i></i></span>'; board.append(el);
+      enemies.push({ el, hp: maxHp, maxHp, progress: 0, speed: boss ? .52 : .75 + wave * .035, reward: boss ? 45 : 12 + wave * 2, boss });
+    }
+    function startWave() {
+      if (running || health <= 0) return;
+      running = true; startBtn.disabled = true; const count = 5 + wave * 2, gap = Math.max(340, 700 - wave * 20); let spawned = 0;
+      message.textContent = `웨이브 ${wave}: 적 ${count}마리가 접근합니다!`;
+      spawnTimer = setInterval(() => { spawnEnemy(spawned, count); if (++spawned >= count) { clearInterval(spawnTimer); spawnTimer = null; } }, gap);
+      spawnEnemy(spawned++, count);
+    }
+    function cellPosition(x, y) { return { x: (x + .5) / COLS * 100, y: (y + .5) / ROWS * 100 }; }
+    function shoot(tower, target) {
+      const origin = cellPosition(tower.x, tower.y), el = document.createElement('i'); el.className = 'bullet'; board.append(el);
+      bullets.push({ el, x: origin.x, y: origin.y, target, damage: tower.damage });
+    }
+    function endGame(win) {
+      running = false; clearInterval(spawnTimer); spawnTimer = null; startBtn.disabled = false;
+      if (win) { gold += WAVE_BONUS + wave * 5; updateStats(); }
+      if (win && wave === MAX_WAVE) { startBtn.disabled = true; showEndScreen(true); }
+      else if (win) { wave++; updateStats(); startBtn.textContent = `웨이브 ${wave} 시작`; message.textContent = `웨이브를 막았습니다! 보너스 골드를 받았습니다.`; }
+      else { startBtn.disabled = true; showEndScreen(false); }
+    }
+    function showEndScreen(won) {
+      const starCount = health >= 14 ? 3 : health >= 7 ? 2 : 1;
+      endTitle.textContent = won ? '🏆 승리!' : '💀 패배';
+      endCopy.textContent = won ? '숲의 관문은 지켜졌습니다.' : '기지가 무너져 숲길이 어둠에 잠겼습니다.';
+      stars.textContent = '★'.repeat(starCount) + '☆'.repeat(3 - starCount); endScreen.classList.add('show');
+    }
+    function showGoldGain(x, y, amount) {
+      const popup = document.createElement('span'); popup.className = 'gold-gain'; popup.textContent = `+${amount}`; popup.style.left = x + '%'; popup.style.top = y + '%'; board.append(popup);
+      popup.addEventListener('animationend', () => popup.remove());
+    }
+    function damageBase(amount) {
+      health = Math.max(0, health - amount); updateStats(); game.classList.remove('shake'); healthBox.classList.remove('damage');
+      requestAnimationFrame(() => { game.classList.add('shake'); healthBox.classList.add('damage'); });
+      setTimeout(() => { game.classList.remove('shake'); healthBox.classList.remove('damage'); }, 400);
+    }
+    function resetGame() { location.reload(); }
+    function loop(time) {
+      const dt = Math.min((time - lastTime) / 1000, .05); lastTime = time;
+      enemies.slice().forEach(enemy => {
+        enemy.progress += enemy.speed * dt; const segment = Math.floor(enemy.progress), fraction = enemy.progress - segment;
+        if (segment >= path.length - 1) { enemy.el.remove(); enemies.splice(enemies.indexOf(enemy), 1); damageBase(enemy.boss ? 4 : 1); if (health <= 0 && running) endGame(false); return; }
+        const a = path[segment], b = path[segment + 1], pos = cellPosition(a[0] + (b[0] - a[0]) * fraction, a[1] + (b[1] - a[1]) * fraction);
+        enemy.x = pos.x; enemy.y = pos.y; enemy.el.style.left = pos.x + '%'; enemy.el.style.top = pos.y + '%'; enemy.el.querySelector('i').style.width = Math.max(0, enemy.hp / enemy.maxHp * 100) + '%';
+      });
+      if (running) towers.forEach(tower => {
+        tower.cooldown -= dt; if (tower.cooldown > 0) return;
+        const origin = cellPosition(tower.x, tower.y); const targets = enemies.filter(e => Math.hypot(e.x - origin.x, e.y - origin.y) < TOWER_RANGE / COLS * 100 * 1.45);
+        if (targets.length) { targets.sort((a,b) => b.progress - a.progress); shoot(tower, targets[0]); tower.cooldown = .65; }
+      });
+      bullets.slice().forEach(bullet => {
+        if (!enemies.includes(bullet.target)) { bullet.el.remove(); bullets.splice(bullets.indexOf(bullet), 1); return; }
+        bullet.x += (bullet.target.x - bullet.x) * Math.min(1, dt * 13); bullet.y += (bullet.target.y - bullet.y) * Math.min(1, dt * 13);
+        bullet.el.style.left = bullet.x + '%'; bullet.el.style.top = bullet.y + '%';
+        if (Math.hypot(bullet.target.x - bullet.x, bullet.target.y - bullet.y) < 1.2) {
+          bullet.target.hp -= bullet.damage; bullet.el.remove(); bullets.splice(bullets.indexOf(bullet), 1);
+          if (bullet.target.hp <= 0) { const e = bullet.target; showGoldGain(e.x, e.y, e.reward); e.el.remove(); enemies.splice(enemies.indexOf(e), 1); gold += e.reward; updateStats(); }
+        }
+      });
+      if (running && !spawnTimer && enemies.length === 0) endGame(true);
+      requestAnimationFrame(loop);
+    }
+    beginBtn.addEventListener('click', () => startScreen.classList.remove('show'));
+    startBtn.addEventListener('click', startWave); restartBtn.addEventListener('click', resetGame); updateStats(); requestAnimationFrame(loop);
+  </script>
+</body>
+</html>

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>초원 수호대</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: radial-gradient(circle at top, #284050, #101820 68%); color: #f7f0d6; font-family: system-ui, -apple-system, "Malgun Gothic", sans-serif; }
+    .game { width: min(94vw, 810px); padding: 20px; border: 1px solid #607482; border-radius: 22px; background: #17262e; box-shadow: 0 22px 70px #0009; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
+    h1 { margin: 0; font-size: clamp(1.3rem, 4vw, 2rem); letter-spacing: -.04em; }
+    .stats { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+    .stat { padding: 7px 11px; border-radius: 99px; background: #2b3d40; font-weight: 700; font-size: .9rem; white-space: nowrap; }
+    .gold { color: #ffd663; } .hp { color: #ff8b7d; } .wave { color: #92d7ff; }
+    #board { position: relative; display: grid; grid-template-columns: repeat(12, 1fr); aspect-ratio: 12 / 8; overflow: hidden; border: 4px solid #41575d; border-radius: 14px; background: #6aa65e; user-select: none; }
+    .cell { position: relative; border: 1px solid #ffffff16; cursor: pointer; }
+    .cell:not(.path):not(.occupied):hover { background: #d8ee8b55; }
+    .cell.path { background: #c9a66e; cursor: default; }
+    .cell.path::after { content: ""; position: absolute; inset: 36%; border-radius: 50%; background: #a98658; opacity: .45; }
+    .tower { position: absolute; z-index: 2; width: 74%; aspect-ratio: 1; left: 13%; top: 13%; border: 3px solid #69421e; border-radius: 8px 8px 42% 42%; background: linear-gradient(130deg, #ead7a0, #a36b39); box-shadow: inset 0 0 0 3px #fff3; pointer-events: none; }
+    .tower::after { content: ""; position: absolute; width: 90%; height: 15%; right: -56%; top: 35%; transform-origin: left center; background: #5b422e; border-radius: 4px; }
+    .enemy { position: absolute; z-index: 4; width: 5.8%; aspect-ratio: 1; transform: translate(-50%, -50%); border: 3px solid #562d34; border-radius: 50%; background: radial-gradient(circle at 34% 30%, #ffb19c 0 11%, #c85c55 12% 58%, #802f38 60%); box-shadow: 0 2px 4px #0008; pointer-events: none; transition: left .08s linear, top .08s linear; }
+    .enemy strong { position: absolute; left: -15%; top: -10px; width: 130%; height: 5px; border-radius: 3px; background: #421e27; overflow: hidden; }
+    .enemy strong::after { content: ""; display: block; width: var(--health); height: 100%; background: #86e86e; }
+    .projectile { position: absolute; z-index: 5; width: 9px; height: 9px; margin: -4px; border-radius: 50%; background: #fff0a2; box-shadow: 0 0 9px #fff176; pointer-events: none; }
+    .controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
+    .hint { margin: 0; color: #c5d9d0; font-size: .92rem; }
+    button { border: 0; border-radius: 9px; padding: 10px 15px; background: #efb75e; color: #202016; font: inherit; font-weight: 800; cursor: pointer; } button:hover { filter: brightness(1.1); }
+    .notice { min-height: 1.4em; margin: 10px 0 0; text-align: center; color: #ffe7a0; font-weight: 700; }
+    .overlay { position: absolute; z-index: 10; inset: 0; display: none; place-items: center; background: #0d1720dd; text-align: center; } .overlay.show { display: grid; }
+    .overlay h2 { margin: 0 0 9px; font-size: 2.1rem; } .overlay p { margin: 0 0 17px; color: #d3e0da; }
+    @media (max-width: 560px) { .game { padding: 12px; border-radius: 14px; } header { align-items: flex-start; flex-direction: column; } .stats { justify-content: flex-start; } .controls { align-items: flex-start; flex-direction: column; } }
+  </style>
+</head>
+<body>
+  <main class="game">
+    <header>
+      <h1>🏰 초원 수호대</h1>
+      <div class="stats"><span class="stat gold">🪙 골드 <b id="gold">120</b></span><span class="stat hp">❤ 기지 <b id="baseHp">15</b></span><span class="stat wave">⚔ 웨이브 <b id="wave">1</b></span></div>
+    </header>
+    <section id="board" aria-label="게임 보드"></section>
+    <div class="controls"><p class="hint">빈 풀밭을 클릭해 <b>50 골드</b>로 탑을 설치하세요. 탑은 가까운 적을 자동 공격합니다.</p><button id="restart">새 게임</button></div>
+    <p class="notice" id="notice"></p>
+  </main>
+  <script>
+    (() => {
+      const COLS = 12, ROWS = 8, COST = 50;
+      const route = [[0,2],[1,2],[2,2],[3,2],[3,3],[3,4],[4,4],[5,4],[6,4],[6,3],[6,2],[7,2],[8,2],[8,3],[8,4],[8,5],[9,5],[10,5],[11,5]];
+      const board = document.querySelector('#board'), goldEl = document.querySelector('#gold'), hpEl = document.querySelector('#baseHp'), waveEl = document.querySelector('#wave'), notice = document.querySelector('#notice');
+      let gold, baseHp, wave, towers, enemies, running, spawnTimer, lastFrame, nextWaveAt, hasStartedWave;
+      const key = ([x,y]) => `${x},${y}`;
+      const routeSet = new Set(route.map(key));
+      function reset() {
+        gold = 120; baseHp = 15; wave = 1; towers = []; enemies = []; running = true; spawnTimer = 0; nextWaveAt = 0; hasStartedWave = false; lastFrame = performance.now();
+        board.replaceChildren();
+        for (let y=0; y<ROWS; y++) for (let x=0; x<COLS; x++) {
+          const cell = document.createElement('div'); cell.className = `cell${routeSet.has(`${x},${y}`) ? ' path' : ''}`; cell.dataset.x=x; cell.dataset.y=y;
+          cell.addEventListener('click', () => build(x,y,cell)); board.append(cell);
+        }
+        const overlay = document.createElement('div'); overlay.className='overlay'; overlay.id='overlay'; board.append(overlay);
+        updateUi(); say('첫 웨이브가 시작됩니다!'); requestAnimationFrame(loop);
+      }
+      function build(x,y,cell) {
+        if (!running || routeSet.has(`${x},${y}`) || towers.some(t=>t.x===x&&t.y===y)) return;
+        if (gold < COST) return say('골드가 부족합니다! 적을 처치해 골드를 모으세요.');
+        gold -= COST; const tower = {x,y,cooldown:0, cell}; towers.push(tower); cell.classList.add('occupied');
+        const icon=document.createElement('i'); icon.className='tower'; cell.append(icon); updateUi(); say('탑을 설치했습니다.');
+      }
+      function spawnWave() {
+        const count = 6 + wave * 2, hp = 32 + wave * 14;
+        for(let i=0;i<count;i++) setTimeout(() => { if(running) spawnEnemy(hp); }, i*650);
+        say(`${wave} 웨이브: 적 ${count}마리 접근 중!`); spawnTimer = count*650 + 1200;
+      }
+      function spawnEnemy(hp) {
+        const el=document.createElement('div'); el.className='enemy'; el.innerHTML='<strong></strong>'; board.append(el);
+        enemies.push({progress:0, hp, maxHp:hp, speed:.72 + wave*.035, el, dead:false});
+      }
+      function posAt(progress) {
+        const i=Math.min(route.length-1, Math.floor(progress)), a=route[i], b=route[Math.min(route.length-1,i+1)], f=progress-i;
+        return {x:a[0]+(b[0]-a[0])*f+.5, y:a[1]+(b[1]-a[1])*f+.5};
+      }
+      function shoot(tower, enemy) {
+        const from={x:tower.x+.5,y:tower.y+.5}, to=posAt(enemy.progress), shot=document.createElement('i'); shot.className='projectile';
+        const set=(p)=>{shot.style.left=`${p.x/COLS*100}%`;shot.style.top=`${p.y/ROWS*100}%`}; set(from); board.append(shot);
+        requestAnimationFrame(()=>{ set(to); shot.style.transition='left .15s linear, top .15s linear'; }); setTimeout(()=>shot.remove(),180);
+        enemy.hp-=18; if(enemy.hp<=0){ enemy.dead=true; enemy.el.remove(); gold+=12; say('+12 골드!'); updateUi(); }
+      }
+      function loop(now) {
+        if(!running) return; const dt=Math.min(.05,(now-lastFrame)/1000); lastFrame=now;
+        if (spawnTimer<=0 && enemies.length===0) { if(nextWaveAt===0) nextWaveAt=now+900; if(now>=nextWaveAt){ if(hasStartedWave) wave++; hasStartedWave=true; updateUi(); spawnWave(); nextWaveAt=0; } } else spawnTimer-=dt*1000;
+        enemies.forEach(e=>{ e.progress+=e.speed*dt; if(e.progress>=route.length-1){ e.dead=true; e.el.remove(); baseHp-=1; say('적이 기지에 도달했습니다!'); updateUi(); } else { const p=posAt(e.progress); e.el.style.left=`${p.x/COLS*100}%`; e.el.style.top=`${p.y/ROWS*100}%`; e.el.querySelector('strong').style.setProperty('--health',`${Math.max(0,e.hp/e.maxHp*100)}%`); } });
+        enemies=enemies.filter(e=>!e.dead);
+        towers.forEach(t=>{ t.cooldown-=dt; if(t.cooldown<=0){ const target=enemies.map(e=>({e,p:posAt(e.progress)})).filter(o=>Math.hypot(o.p.x-(t.x+.5),o.p.y-(t.y+.5))<2.75).sort((a,b)=>b.e.progress-a.e.progress)[0]; if(target){ shoot(t,target.e); t.cooldown=.58; } } });
+        if(baseHp<=0) endGame(); else requestAnimationFrame(loop);
+      }
+      function updateUi(){ goldEl.textContent=gold; hpEl.textContent=Math.max(0,baseHp); waveEl.textContent=wave; }
+      function say(text){ notice.textContent=text; }
+      function endGame(){ running=false; const overlay=document.querySelector('#overlay'); overlay.classList.add('show'); overlay.innerHTML=`<div><h2>게임 오버</h2><p>${wave} 웨이브에서 기지가 함락되었습니다.</p><button onclick="location.reload()">다시 도전</button></div>`; }
+      document.querySelector('#restart').addEventListener('click',reset);
+      reset();
+    })();
+  </script>
+</body>
+</html>
